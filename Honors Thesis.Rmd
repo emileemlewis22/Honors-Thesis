@@ -1,0 +1,277 @@
+---
+title: "Honors Thesis - NICU Data Analysis"
+author: "Emilee Lewis"
+date: "12/15/2025"
+output:
+  html_document:
+    highlight: tango
+    theme: flatly
+---
+
+
+```{r knitr, include = FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+
+```{r load-packages}
+library(tidyverse)
+library(readxl)
+library(janitor)
+library(scales)
+library(openintro)
+library(tidymodels)
+library(caret)
+library(GGally)
+library(ranger)
+```
+
+
+```{r load-data}
+duke_nicu <- read_xlsx("Data/Duke NICU Data.xlsx")
+```
+
+
+## Data Dictionary
+
+| Variable                      | Description
+|:----------------|:-----------------------------------------------------------------
+|`patient_id`                   | De-identified, randomized patient identification number assigned to each infant
+|`survival_status`              | Whether the infant was alive or deceased at the time of discharge
+|`gestational_age`              | Gestational age at birth (in weeks)
+|`birth_weight`                 | Birth weight of the infant (in grams)
+|`gender`                       | Sex of the infant
+|`inborn`                       | Whether the infant was born at Duke Hospital or transferred from another facility (`Yes`, `No`)
+|`race_ethnicity`               | Racial/ethnic classification of the infant (`White`, `Black`, `Other`)
+|`length_of_stay`               | Total length of stay (in days) from admission to discharge or death
+|`ivh`                          | Presence or grade of intraventricular hemorrhage (IVH), bleeding into the internal structures of the brain (`None`, `Grade I`, `Grade II`, `Grade III`, `Grade IV`)
+|`rop`                          | Presence or stage of retinopathy of prematurity (ROP), a condition affecting blood vessels in the eye that leads to blindness if not promptly treated (`None`, `Stage I`, `Stage II`, `Stage III–IV (No Cryo or Laser Surgery)`, `Stage III–IV (With Cryo or Laser Surgery)`)
+|`nec`                          | Presence or type of necrotizing enterocolitis (NEC), a severe neonatal intestinal condition (`None`, `Medical`, `Surgical`)
+|`pda`                          | Presence and management of patent ductus arteriosus (PDA), a neonatal cardiovascular anomaly requiring medical or surgical intervention (`None`, `None (Medication Only)`, `Yes (Medically Treated)`, `Yes (Ligated)`, `Yes (Untreated)`)
+
+
+## Data Cleaning
+
+```{r duke_nicu_clean}
+duke_nicu_clean <- duke_nicu %>%
+  select(-"BWgt", -"ROP", -"PDA", -"LOS Predictor") %>%
+  clean_names() %>%
+  rename(patient_id = pt_id_rnd_num,
+         survival_status = alive_died,
+         gestational_age = gest_age,
+         length_of_stay = los,
+         rop = rop_abbrev,
+         pda = pda_condensed_rx) %>%
+  mutate(gender = recode(gender,
+                         "M" = "Male",
+                         "F" = "Female"),
+         inborn = recode(inborn,
+                         "YES" = "Yes",
+                         "NO" = "No"),
+         race_ethnicity = recode(race_ethnicity,
+                                 "OTHER" = "Other",
+                                 "WHITE" = "White",
+                                 "BLACK" = "Black"),
+         ivh = recode(ivh,
+                      "NONE" = "None",
+                      "GRADE I" = "Grade I",
+                      "GRADE II" = "Grade II",
+                      "GRADE III" = "Grade III",
+                      "GRADE IV" = "Grade IV"),
+         rop = recode(rop,
+                      "NONE" = "None",
+                      "STAGE I" = "Stage I",
+                      "STAGE II" = "Stage II",
+                      "STAGE III-IV WITH CRYO OR LASER SURGERY" = "Stage III–IV (With Cryo or Laser Surgery)",
+                      "STAGE III-IV, NO CRYO OR LASER SURGERY" = "Stage III–IV (No Cryo or Laser Surgery)"),
+         nec = recode(nec,
+                      "NONE" = "None",
+                      "MEDICAL" = "Medical",
+                      "SURGICAL" = "Surgical"),
+         pda = recode(pda,
+                      "NONE" = "None",
+                      "NONE-RX" = "None (Medication Only)",
+                      "YES, LIGATED" = "Yes (Ligated)",
+                      "YES-RX" = "Yes (Medically Treated)",
+                      "YES, NO TX" = "Yes (Untreated)"),
+         ivh = fct_explicit_na(ivh, na_level = "Missing"),
+         nec = fct_explicit_na(nec, na_level = "Missing"),
+         pda = fct_explicit_na(pda, na_level = "Missing"),
+         across(c(gender, inborn, race_ethnicity, survival_status,
+                  ivh, rop, nec, pda), ~ as.factor(.)))
+```
+
+```{r duke_nicu_clean-colSums}
+colSums(is.na(duke_nicu_clean))
+```
+
+```{r duke_nicu_clean-summary}
+summary(duke_nicu_clean$gestational_age)
+summary(duke_nicu_clean$birth_weight)
+summary(duke_nicu_clean$length_of_stay)
+```
+
+
+## Exploratory Data Analysis
+
+```{r duke_nicu_clean-hist, warning = FALSE}
+ggplot(data = duke_nicu_clean,
+       mapping = aes(x = length_of_stay)) +
+  geom_histogram(bins = 40, color = "black", fill = "#4E79A7") +
+  theme_minimal() +
+  labs(x = "Length of Stay (Days)",
+       y = "Number of Babies",
+       title = "Distribution of Length of Stay")
+```
+
+```{r duke_nicu_clean-hist2, warning = FALSE}
+ggplot(data = duke_nicu_clean,
+       mapping = aes(x = log(length_of_stay + 1))) +
+  geom_histogram(bins = 40, color = "black", fill = "#4E79A7") +
+  theme_minimal() +
+  labs(x = "log(LOS + 1)",
+       y = "Number of Babies",
+       title = "Log-Transformed Distribution of Length of Stay")
+```
+
+```{r duke_nicu_clean-bar}
+ggplot(data = duke_nicu_clean,
+       mapping = aes(x = survival_status,
+                     fill = survival_status)) +
+  geom_bar(show.legend = FALSE) +
+  scale_fill_manual(values = c("Alive" = "#4E79A7",
+                               "Died" = "#E15759")) +
+  theme_minimal() +
+  labs(x = NULL,
+       y = "Number of Babies",
+       title = "Distribution of Survival Status")
+```
+
+```{r duke_nicu_clean-col}
+duke_nicu_clean %>%
+  group_by(survival_status) %>%
+  summarize(mean_los = mean(length_of_stay, na.rm = TRUE)) %>%
+  ggplot(mapping = aes(x = survival_status,
+                       y = mean_los,
+                       fill = survival_status)) +
+  geom_col(show.legend = FALSE) +
+  scale_fill_manual(values = c("Alive" = "#4E79A7",
+                               "Died" = "#E15759")) +
+  theme_minimal() +
+  labs(x = NULL,
+       y = "Average Length of Stay (Days)",
+       title = "Average Length of Stay by Survival Status")
+```
+
+```{r duke_nicu_clean-line}
+duke_nicu_clean %>%
+  group_by(gestational_age) %>%
+  summarize(mean_los = mean(length_of_stay, na.rm = TRUE)) %>%
+  ggplot(mapping = aes(x = gestational_age,
+                       y = mean_los)) +
+  geom_line(color = "#4E79A7") +
+  geom_point() +
+  theme_minimal() +
+  labs(x = "Gestational Age (Weeks)",
+       y = "Average Length of Stay (Days)",
+       title = "Average Length of Stay by Gestational Age")
+```
+
+```{r duke_nicu_clean-bar2, warning = FALSE}
+ggplot(data = duke_nicu_clean,
+       mapping = aes(x = gender,
+                     fill = gender)) +
+  geom_bar(show.legend = FALSE) +
+  scale_fill_manual(values = c("Female" = "#B07AA1",
+                               "Male" = "#4E79A7")) +
+  theme_minimal() +
+  labs(x = NULL,
+       y = "Number of Babies",
+       title = "Distribution of Gender")
+```
+
+```{r duke_nicu_clean-boxplot, warning = FALSE}
+ggplot(data = duke_nicu_clean %>% filter(ivh != "Missing"),
+       mapping = aes(x = length_of_stay,
+                     y = fct_relevel(ivh, "None", "Grade I", "Grade II",
+                                     "Grade III", "Grade IV"))) +
+  geom_boxplot(fill = "#4E79A7") +
+  theme_minimal() +
+  labs(x = "Length of Stay (Days)",
+       y = NULL,
+       title = "Length of Stay by IVH Grade")
+```
+
+```{r duke_nicu_clean-boxplot2, warning = FALSE}
+ggplot(data = duke_nicu_clean,
+       mapping = aes(x = length_of_stay,
+                     y = rop)) +
+  geom_boxplot(fill = "#4E79A7") +
+  scale_y_discrete(labels = c("Stage III–IV (No Cryo or Laser Surgery)" = "Stage III–IV (No Tx)",
+                              "Stage III–IV (With Cryo or Laser Surgery)" = "Stage III–IV (Tx)")) +
+  theme_minimal() +
+  labs(x = "Length of Stay (Days)",
+       y = NULL,
+       title = "Length of Stay by ROP Stage")
+```
+
+```{r duke_nicu_clean-boxplot3, warning = FALSE}
+ggplot(data = duke_nicu_clean %>% filter(nec != "Missing"),
+       mapping = aes(x = length_of_stay,
+                     y = fct_relevel(nec, "None", "Surgical", "Medical"))) +
+  geom_boxplot(fill = "#4E79A7") +
+  theme_minimal() +
+  labs(x = "Length of Stay (Days)",
+       y = NULL,
+       title = "Length of Stay by NEC Type")
+```
+
+```{r duke_nicu_clean-boxplot4, warning = FALSE}
+ggplot(data = duke_nicu_clean %>% filter(pda != "Missing"),
+       mapping = aes(x = length_of_stay,
+                     y = pda)) +
+  geom_boxplot(fill = "#4E79A7") +
+  theme_minimal() +
+  labs(x = "Length of Stay (Days)",
+       y = NULL,
+       title = "Length of Stay by PDA Management")
+```
+
+```{r duke_nicu_clean-ggpairs, message = FALSE, warning = FALSE}
+duke_nicu_clean %>%
+  select(gestational_age, birth_weight, length_of_stay) %>%
+  ggpairs()
+```
+
+
+## Modeling
+
+```{r duke_nicu_model}
+duke_nicu_model <- duke_nicu_clean %>%
+  filter(!is.na(length_of_stay))
+```
+
+```{r duke_nicu_model-glimpse}
+glimpse(duke_nicu_model)
+```
+
+```{r duke_nicu_model_split}
+set.seed(1234)
+duke_nicu_model_split <- initial_split(duke_nicu_model, prop = 0.80)
+
+train_data <- training(duke_nicu_model_split)
+test_data <- testing(duke_nicu_model_split)
+```
+
+```{r train_data-test_data-glimpse}
+glimpse(train_data)
+glimpse(test_data)
+```
+
+```{r full_lm}
+full_lm <- lm(length_of_stay ~ ., data = train_data)
+```
+
+```{r full_lm-summary}
+summary(full_lm)
+```
