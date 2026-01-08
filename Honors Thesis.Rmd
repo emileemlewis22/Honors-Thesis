@@ -1,7 +1,7 @@
 ---
 title: "Honors Thesis - NICU Data Analysis"
 author: "Emilee Lewis"
-date: "1/2/2026"
+date: "1/7/2026"
 output:
   html_document:
     highlight: tango
@@ -18,12 +18,12 @@ knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
 library(tidyverse)
 library(readxl)
 library(janitor)
-library(scales)
-library(openintro)
-library(tidymodels)
 library(GGally)
+library(tidymodels)
 library(caret)
 library(broom)
+library(rpart)
+library(rpart.plot)
 library(ranger)
 ```
 
@@ -370,7 +370,7 @@ glimpse(test_data)
 ```
 
 
-### Linear Regression
+### Linear Regression Models
 
 ```{r full_lm}
 full_lm <- lm(length_of_stay ~ . - patient_id, data = train_data)
@@ -448,7 +448,7 @@ ggplot(data = log_aug,
 ```{r log_aug-qq}
 ggplot(data = log_aug,
        mapping = aes(sample = .resid)) +
-  stat_qq_point(alpha = 0.5) +
+  stat_qq(alpha = 0.5) +
   stat_qq_line(color = "blue") +
   theme_minimal() +
   labs(x = "Theoretical Quantiles",
@@ -457,5 +457,77 @@ ggplot(data = log_aug,
 ```
 
 
-### Decision Trees and Random Forest
+### Decision Tree Model
 
+```{r tree_model}
+tree_model <- rpart(log_los ~ . - patient_id - length_of_stay,
+                    data = train_data2,
+                    method = "anova")
+
+summary(tree_model)
+```
+
+```{r tree_model-plot}
+rpart.plot(tree_model, type = 3, extra = 101)
+```
+
+
+### Random Forest Model
+
+```{r rf_model}
+rf_model <- ranger(log_los ~ . - patient_id - length_of_stay,
+                   data = train_data2,
+                   num.trees = 500,
+                   importance = "impurity")
+```
+
+```{r rf_model-variable.importance}
+rf_model$variable.importance
+```
+
+```{r importance_df}
+importance_df <- data.frame(variable = names(rf_model$variable.importance),
+                            importance = rf_model$variable.importance)
+
+ggplot(data = importance_df,
+       mapping = aes(x = importance,
+                     y = reorder(variable, importance))) +
+  geom_col(fill = "#4E79A7") +
+  scale_y_discrete(labels = c("birth_weight" = "Birth Weight",
+                              "gestational_age" = "Gestational Age",
+                              "rop" = "ROP",
+                              "pda" = "PDA",
+                              "survival_status" = "Survival Status",
+                              "inborn" = "Inborn",
+                              "ivh" = "IVH",
+                              "race_ethnicity" = "Race/Ethnicity",
+                              "nec" = "NEC",
+                              "gender" = "Gender")) +
+  theme_minimal() +
+  labs(x = "Variable Importance",
+       y = NULL,
+       title = "Random Forest Variable Importance for Log Length of Stay")
+```
+
+
+### Predictive Performance
+
+```{r lm_pred, tree_pred, rf_pred}
+lm_pred <- predict(full_lm_log, newdata = test_data2)
+
+tree_pred <- predict(tree_model, newdata = test_data2)
+
+rf_pred <- predict(rf_model, data = test_data2)$predictions
+```
+
+```{r rmse_lm, rmse_tree, rmse_rf}
+rmse <- function(actual, predicted) {sqrt(mean((actual - predicted)^2))}
+
+rmse_lm  <- rmse(test_data2$log_los, lm_pred)
+rmse_tree <- rmse(test_data2$log_los, tree_pred)
+rmse_rf <- rmse(test_data2$log_los, rf_pred)
+
+rmse_lm
+rmse_tree
+rmse_rf
+```
