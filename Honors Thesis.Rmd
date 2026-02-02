@@ -1,7 +1,7 @@
 ---
 title: "Honors Thesis - NICU Data Analysis"
 author: "Emilee Lewis"
-date: "1/7/2026"
+date: "2/1/2026"
 output:
   html_document:
     highlight: tango
@@ -125,6 +125,21 @@ ggplot(data = duke_nicu_clean,
        title = "Distribution of Length of Stay")
 ```
 
+```{r duke_nicu_clean-boxplot, warning = FALSE}
+ggplot(data = duke_nicu_clean,
+       mapping = aes(x = length_of_stay)) +
+  geom_boxplot(color = "black", fill = "#4E79A7") +
+  theme_minimal() +
+  theme(axis.text.y = element_blank()) +
+  labs(x = "Length of Stay (Days)",
+       y = NULL,
+       title = "Distribution of Length of Stay")
+```
+
+```{r duke_nicu_clean-length_of_stay-median}
+median(duke_nicu_clean$length_of_stay, na.rm = TRUE)
+```
+
 ```{r duke_nicu_clean-hist2, warning = FALSE}
 ggplot(data = duke_nicu_clean,
        mapping = aes(x = log(length_of_stay + 1))) +
@@ -132,6 +147,17 @@ ggplot(data = duke_nicu_clean,
   theme_minimal() +
   labs(x = "log(LOS + 1)",
        y = "Number of Infants",
+       title = "Log-Transformed Distribution of Length of Stay")
+```
+
+```{r duke_nicu_clean-boxplot2, warning = FALSE}
+ggplot(data = duke_nicu_clean,
+       mapping = aes(x = log(length_of_stay + 1))) +
+  geom_boxplot(color = "black", fill = "#4E79A7") +
+  theme_minimal() +
+  theme(axis.text.y = element_blank()) +
+  labs(x = "log(LOS + 1)",
+       y = NULL,
        title = "Log-Transformed Distribution of Length of Stay")
 ```
 
@@ -222,7 +248,7 @@ ggplot(data = duke_nicu_clean,
        title = "Distribution of Gender")
 ```
 
-```{r duke_nicu_clean-boxplot, warning = FALSE}
+```{r duke_nicu_clean-boxplot3, warning = FALSE}
 ggplot(data = duke_nicu_clean %>% filter(ivh != "Missing"),
        mapping = aes(x = length_of_stay,
                      y = fct_relevel(ivh, "None", "Grade I", "Grade II",
@@ -250,7 +276,18 @@ ggplot(data = duke_nicu_clean %>% filter(ivh != "Missing"),
        fill = "Survival Status")
 ```
 
-```{r duke_nicu_clean-boxplot2, warning = FALSE}
+```{r duke_nicu_clean-ivh-summary-stats}
+duke_nicu_clean %>%
+  group_by(ivh) %>%
+  summarise(n = n(),
+            mean_los = mean(length_of_stay, na.rm = TRUE),
+            median_los = median(length_of_stay, na.rm = TRUE),
+            IQR_los = IQR(length_of_stay, na.rm = TRUE),
+            min_los = min(length_of_stay, na.rm = TRUE),
+            max_los = max(length_of_stay, na.rm = TRUE))
+```
+
+```{r duke_nicu_clean-boxplot4, warning = FALSE}
 ggplot(data = duke_nicu_clean,
        mapping = aes(x = length_of_stay,
                      y = rop)) +
@@ -282,7 +319,18 @@ ggplot(data = duke_nicu_clean,
        fill = "Survival Status")
 ```
 
-```{r duke_nicu_clean-boxplot3, warning = FALSE}
+```{r duke_nicu_clean-rop-summary-stats}
+duke_nicu_clean %>%
+  group_by(rop) %>%
+  summarise(n = n(),
+            mean_los = mean(length_of_stay, na.rm = TRUE),
+            median_los = median(length_of_stay, na.rm = TRUE),
+            IQR_los = IQR(length_of_stay, na.rm = TRUE),
+            min_los = min(length_of_stay, na.rm = TRUE),
+            max_los = max(length_of_stay, na.rm = TRUE))
+```
+
+```{r duke_nicu_clean-boxplot5, warning = FALSE}
 ggplot(data = duke_nicu_clean %>% filter(nec != "Missing"),
        mapping = aes(x = length_of_stay,
                      y = fct_relevel(nec, "None", "Surgical", "Medical"))) +
@@ -308,7 +356,18 @@ ggplot(data = duke_nicu_clean %>% filter(nec != "Missing"),
        fill = "Survival Status")
 ```
 
-```{r duke_nicu_clean-boxplot4, warning = FALSE}
+```{r duke_nicu_clean-nec-summary-stats}
+duke_nicu_clean %>%
+  group_by(nec) %>%
+  summarise(n = n(),
+            mean_los = mean(length_of_stay, na.rm = TRUE),
+            median_los = median(length_of_stay, na.rm = TRUE),
+            IQR_los = IQR(length_of_stay, na.rm = TRUE),
+            min_los = min(length_of_stay, na.rm = TRUE),
+            max_los = max(length_of_stay, na.rm = TRUE))
+```
+
+```{r duke_nicu_clean-boxplot6, warning = FALSE}
 ggplot(data = duke_nicu_clean %>% filter(pda != "Missing"),
        mapping = aes(x = length_of_stay,
                      y = pda)) +
@@ -340,6 +399,17 @@ ggplot(data = duke_nicu_clean %>% filter(pda != "Missing"),
        y = "Proportion",
        title = "Survival Outcomes by PDA Management",
        fill = "Survival Status")
+```
+
+```{r duke_nicu_clean-pda-summary-stats}
+duke_nicu_clean %>%
+  group_by(pda) %>%
+  summarise(n = n(),
+            mean_los = mean(length_of_stay, na.rm = TRUE),
+            median_los = median(length_of_stay, na.rm = TRUE),
+            IQR_los = IQR(length_of_stay, na.rm = TRUE),
+            min_los = min(length_of_stay, na.rm = TRUE),
+            max_los = max(length_of_stay, na.rm = TRUE))
 ```
 
 ```{r duke_nicu_clean-ggpairs, message = FALSE, warning = FALSE}
