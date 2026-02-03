@@ -1,7 +1,7 @@
 ---
 title: "Honors Thesis - NICU Data Analysis"
 author: "Emilee Lewis"
-date: "2/1/2026"
+date: "2/2/2026"
 output:
   html_document:
     highlight: tango
@@ -110,6 +110,16 @@ colSums(is.na(duke_nicu_clean))
 summary(duke_nicu_clean$gestational_age)
 summary(duke_nicu_clean$birth_weight)
 summary(duke_nicu_clean$length_of_stay)
+```
+
+```{r duke_nicu_clean_2}
+duke_nicu_clean_2 <- duke_nicu_clean %>%
+  mutate(ivh_2 = if_else(ivh == "None", "No", "Yes"),
+         nec_2 = if_else(nec == "None", "No", "Yes"),
+         rop_2 = if_else(rop == "None", "No", "Yes"),
+         pda_2 = if_else(pda %in% c("None", "None (Medication Only)"),
+                         "No", "Yes")) %>%
+  mutate(across(ends_with("_2"), ~ factor(.x, levels = c("No", "Yes"))))
 ```
 
 
@@ -422,7 +432,7 @@ duke_nicu_clean %>%
 ## Modeling
 
 ```{r duke_nicu_model}
-duke_nicu_model <- duke_nicu_clean %>%
+duke_nicu_model <- duke_nicu_clean_2 %>%
   filter(!is.na(length_of_stay))
 
 glimpse(duke_nicu_model)
@@ -443,7 +453,9 @@ glimpse(test_data)
 ### Linear Regression Models
 
 ```{r full_lm}
-full_lm <- lm(length_of_stay ~ . - patient_id, data = train_data)
+full_lm <- lm(length_of_stay ~ . - patient_id
+              - ivh_2 - rop_2 - nec_2 - pda_2,
+              data = train_data)
 
 summary(full_lm)
 ```
@@ -457,9 +469,19 @@ test_data2 <- test_data %>%
 ```
 
 ```{r full_lm_log}
-full_lm_log <- lm(log_los ~ . - patient_id - length_of_stay, data = train_data2)
+full_lm_log <- lm(log_los ~ . - patient_id - length_of_stay
+                  - ivh_2 - rop_2 - nec_2 - pda_2,
+                  data = train_data2)
 
 summary(full_lm_log)
+```
+
+```{r full_lm_log_categorical}
+full_lm_log_categorical <- lm(log_los ~ . - patient_id - length_of_stay 
+                              - ivh - rop - nec - pda,
+                              data = train_data2)
+
+summary(full_lm_log_categorical)
 ```
 
 ```{r ctrl}
@@ -468,7 +490,8 @@ ctrl <- trainControl(method = "cv", number = 10)
 ```
 
 ```{r lm_caret}
-lm_caret <- train(length_of_stay ~ . - patient_id,
+lm_caret <- train(length_of_stay ~ . - patient_id
+                  - ivh_2 - rop_2 - nec_2 - pda_2,
                   data = train_data,
                   method = "lm",
                   trControl = ctrl,
@@ -478,13 +501,25 @@ lm_caret
 ```
 
 ```{r lm_log_caret}
-lm_log_caret <- train(log_los ~ . - patient_id - length_of_stay,
+lm_log_caret <- train(log_los ~ . - patient_id - length_of_stay
+                      - ivh_2 - rop_2 - nec_2 - pda_2,
                       data = train_data2,
                       method = "lm",
                       trControl = ctrl,
                       metric = "RMSE")
 
 lm_log_caret
+```
+
+```{r lm_log_categorical_caret}
+lm_log_categorical_caret <- train(log_los ~ . - patient_id - length_of_stay
+                      - ivh - rop - nec - pda,
+                      data = train_data2,
+                      method = "lm",
+                      trControl = ctrl,
+                      metric = "RMSE")
+
+lm_log_categorical_caret
 ```
 
 ```{r full_aug-scatter}
@@ -530,7 +565,8 @@ ggplot(data = log_aug,
 ### Decision Tree Model
 
 ```{r tree_model}
-tree_model <- rpart(log_los ~ . - patient_id - length_of_stay,
+tree_model <- rpart(log_los ~ . - patient_id - length_of_stay
+                    - ivh_2 - nec_2 - rop_2 - pda_2,
                     data = train_data2,
                     method = "anova")
 
@@ -545,59 +581,171 @@ rpart.plot(tree_model, type = 3, extra = 101)
 ### Random Forest Model
 
 ```{r rf_model}
-rf_model <- ranger(log_los ~ . - patient_id - length_of_stay,
+rf_model <- ranger(length_of_stay ~ . - patient_id
+                   - ivh_2 - nec_2 - rop_2 - pda_2,
+                   data = train_data,
+                   num.trees = 500,
+                   importance = "impurity")
+
+rf_model
+rf_model$prediction.error
+```
+
+```{r rf_log_model}
+rf_log_model <- ranger(log_los ~ . - patient_id - length_of_stay
+                       - ivh_2 - nec_2 - rop_2 - pda_2,
                    data = train_data2,
                    num.trees = 500,
                    importance = "impurity")
+
+rf_log_model
+rf_log_model$prediction.error
 ```
 
-```{r rf_model-variable.importance}
-rf_model$variable.importance
+```{r rf_categorical_model}
+rf_categorical_model <- ranger(length_of_stay ~ . - patient_id
+                               - ivh - nec - rop - pda,
+                               data = train_data,
+                               num.trees = 500,
+                               importance = "impurity")
+
+rf_categorical_model
+rf_categorical_model$prediction.error
+```
+
+```{r rf_categorical_log_model}
+rf_categorical_log_model <- ranger(log_los ~ . - patient_id - length_of_stay
+                                   - ivh - nec - rop - pda,
+                                   data = train_data2,
+                                   num.trees = 500,
+                                   importance = "impurity")
+
+rf_categorical_log_model
+rf_categorical_log_model$prediction.error
+```
+
+```{r rf_compare}
+tibble(model = c("RF LOS (Severity)",
+                 "RF log LOS (Severity)",
+                 "RF LOS (Categorical)",
+                 "RF log LOS (Categorical)"),
+       oob_rmse = c(rf_model$prediction.error,
+                    rf_log_model$prediction.error,
+                    rf_categorical_model$prediction.error,
+                    rf_categorical_log_model$prediction.error))
+```
+
+```{r rf_formula-p}
+rf_formula <- length_of_stay ~ . - patient_id - ivh_2 - nec_2 - rop_2 - pda_2
+
+p <- ncol(model.matrix(rf_formula, data = train_data)) - 1
+p
+```
+
+```{r mtry_grid}
+mtry_grid <- c(4, 5, 6, 7, 8, 9, 10)
+```
+
+```{r rf_mtry_results}
+set.seed(1234)
+
+rf_mtry_results <- purrr::map_dfr(mtry_grid, function(m)
+  {rf_fit <- ranger(formula = rf_formula,
+                    data = train_data,
+                    num.trees = 500,
+                    mtry = m,
+                    importance = "impurity")
+  tibble(mtry = m,
+         oob_rmse = rf_fit$prediction.error)})
+
+rf_mtry_results
+```
+
+```{r mtry_grid_2-tree_grid}
+mtry_grid_2 <- c(4, 5, 6)
+tree_grid <- c(300, 500, 800)
+```
+
+```{r rf_grid}
+rf_grid <- expand.grid(mtry = mtry_grid_2,
+                       num_trees = tree_grid)
+
+rf_grid
+```
+
+```{r rf_mtry_tree_grid}
+set.seed(1234)
+
+rf_grid_results <- purrr::pmap_dfr(rf_grid, function(mtry, num_trees)
+  {rf_fit <- ranger(formula = rf_formula,
+                    data = train_data,
+                    num.trees = num_trees,
+                    mtry = mtry,
+                    importance = "impurity")
+  tibble(mtry = mtry,
+         num_trees = num_trees,
+         oob_rmse = rf_fit$prediction.error)})
+
+rf_grid_results
+```
+
+```{r rf_model_final}
+set.seed(1234)
+
+rf_model_final <- ranger(formula = rf_formula,
+                         data = train_data,
+                         num.trees = 500,
+                         mtry = 4,
+                         importance = "impurity")
+
+rf_model_final
 ```
 
 ```{r importance_df}
-importance_df <- data.frame(variable = names(rf_model$variable.importance),
-                            importance = rf_model$variable.importance)
+importance_df <- data.frame(variable = names(rf_model_final$variable.importance),
+                            importance = rf_model_final$variable.importance)
 
 ggplot(data = importance_df,
        mapping = aes(x = importance,
                      y = reorder(variable, importance))) +
   geom_col(fill = "#4E79A7") +
-  scale_y_discrete(labels = c("birth_weight" = "Birth Weight",
+  scale_y_discrete(labels = c("rop" = "ROP",
+                              "birth_weight" = "Birth Weight",
                               "gestational_age" = "Gestational Age",
-                              "rop" = "ROP",
                               "pda" = "PDA",
-                              "survival_status" = "Survival Status",
-                              "inborn" = "Inborn",
                               "ivh" = "IVH",
+                              "survival_status" = "Survival Status",
                               "race_ethnicity" = "Race/Ethnicity",
-                              "nec" = "NEC",
-                              "gender" = "Gender")) +
+                              "inborn" = "Inborn",
+                              "gender" = "Gender",
+                              "nec" = "NEC")) +
   theme_minimal() +
   labs(x = "Variable Importance",
        y = NULL,
-       title = "Random Forest Variable Importance for Log Length of Stay")
+       title = "Random Forest Variable Importance for Length of Stay")
 ```
 
 
 ### Predictive Performance
 
-```{r lm_pred, tree_pred, rf_pred}
-lm_pred <- predict(full_lm_log, newdata = test_data2)
-
-tree_pred <- predict(tree_model, newdata = test_data2)
-
-rf_pred <- predict(rf_model, data = test_data2)$predictions
+```{r rmse}
+rmse <- function(actual, predicted)
+  {sqrt(mean((actual - predicted)^2))}
 ```
 
-```{r rmse_lm, rmse_tree, rmse_rf}
-rmse <- function(actual, predicted) {sqrt(mean((actual - predicted)^2))}
+```{r lm_log_preds-rf_preds}
+lm_log_preds <- predict(full_lm_log, newdata = test_data2)
 
-rmse_lm  <- rmse(test_data2$log_los, lm_pred)
-rmse_tree <- rmse(test_data2$log_los, tree_pred)
-rmse_rf <- rmse(test_data2$log_los, rf_pred)
+rf_preds <- predict(rf_model_final, data = test_data)$predictions
+```
 
-rmse_lm
-rmse_tree
-rmse_rf
+```{r rmse_comparison}
+rmse_comparison <- tibble(Model = c("Log-Linear Regression",
+                                    "Random Forest"),
+                          Outcome_Scale = c("Log(LOS + 1)",
+                                            "Days"),
+                          RMSE = c(rmse(test_data2$log_los, lm_log_preds),
+                                   rmse(test_data$length_of_stay, rf_preds)))
+
+rmse_comparison
 ```
