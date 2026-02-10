@@ -1,7 +1,7 @@
 ---
 title: "Honors Thesis - NICU Data Analysis"
 author: "Emilee Lewis"
-date: "2/2/2026"
+date: "2/9/2026"
 output:
   html_document:
     highlight: tango
@@ -114,12 +114,41 @@ summary(duke_nicu_clean$length_of_stay)
 
 ```{r duke_nicu_clean_2}
 duke_nicu_clean_2 <- duke_nicu_clean %>%
-  mutate(ivh_2 = if_else(ivh == "None", "No", "Yes"),
-         nec_2 = if_else(nec == "None", "No", "Yes"),
-         rop_2 = if_else(rop == "None", "No", "Yes"),
-         pda_2 = if_else(pda %in% c("None", "None (Medication Only)"),
-                         "No", "Yes")) %>%
+  mutate(ivh_2 = case_when(ivh %in% c("None", "Missing") ~ "No",
+                           TRUE ~ "Yes"),
+         rop_2 = case_when(rop %in% c("None", "Missing") ~ "No",
+                           TRUE ~ "Yes"),
+         nec_2 = case_when(nec %in% c("None", "Missing") ~ "No",
+                           TRUE ~ "Yes"),
+         pda_2 = case_when(pda %in% c("None",
+                                      "None (Medication Only)",
+                                      "Missing") ~ "No",
+                           TRUE ~ "Yes")) %>%
   mutate(across(ends_with("_2"), ~ factor(.x, levels = c("No", "Yes"))))
+```
+
+```{r duke_nicu_clean_3}
+duke_nicu_clean_3 <- duke_nicu_clean_2 %>%
+  mutate(los_category = case_when(length_of_stay <= 5  ~ "0-5",
+                                  length_of_stay <= 10 ~ "6-10",
+                                  length_of_stay <= 20 ~ "11-20",
+                                  length_of_stay <= 30 ~ "21-30",
+                                  length_of_stay > 30  ~ "31+")) %>%
+  mutate(los_category = factor(los_category, levels = c("0-5",
+                                                        "6-10",
+                                                        "11-20",
+                                                        "21-30",
+                                                        "31+")))
+```
+
+```{r duke_nicu_clean_4}
+duke_nicu_clean_4 <- duke_nicu_clean_2 %>%
+  mutate(los_category_2 = case_when(length_of_stay <= 5  ~ "0-5",
+                                    length_of_stay <= 20 ~ "6-20",
+                                    length_of_stay > 20  ~ "21+")) %>%
+  mutate(los_category_2 = factor(los_category_2, levels = c("0-5",
+                                                            "6-20",
+                                                            "21+")))
 ```
 
 
@@ -242,7 +271,7 @@ ggplot(data = duke_nicu_clean,
   theme_minimal() +
   labs(x = "Birth Weight (Grams)",
        y = "Length of Stay (Days)",
-       title = "Length of Stay vs. Birth Weight",)
+       title = "Length of Stay vs. Birth Weight")
 ```
 
 ```{r duke_nicu_clean-bar2}
@@ -440,6 +469,7 @@ glimpse(duke_nicu_model)
 
 ```{r duke_nicu_model_split}
 set.seed(1234)
+
 duke_nicu_model_split <- initial_split(duke_nicu_model, prop = 0.80)
 
 train_data <- training(duke_nicu_model_split)
@@ -460,18 +490,18 @@ full_lm <- lm(length_of_stay ~ . - patient_id
 summary(full_lm)
 ```
 
-```{r train_data2, test_data2}
-train_data2 <- train_data %>%
+```{r train_data_2, test_data_2}
+train_data_2 <- train_data %>%
   mutate(log_los = log(length_of_stay + 1))
 
-test_data2 <- test_data %>%
+test_data_2 <- test_data %>%
   mutate(log_los = log(length_of_stay + 1))
 ```
 
 ```{r full_lm_log}
 full_lm_log <- lm(log_los ~ . - patient_id - length_of_stay
                   - ivh_2 - rop_2 - nec_2 - pda_2,
-                  data = train_data2)
+                  data = train_data_2)
 
 summary(full_lm_log)
 ```
@@ -479,7 +509,7 @@ summary(full_lm_log)
 ```{r full_lm_log_categorical}
 full_lm_log_categorical <- lm(log_los ~ . - patient_id - length_of_stay 
                               - ivh - rop - nec - pda,
-                              data = train_data2)
+                              data = train_data_2)
 
 summary(full_lm_log_categorical)
 ```
@@ -503,7 +533,7 @@ lm_caret
 ```{r lm_log_caret}
 lm_log_caret <- train(log_los ~ . - patient_id - length_of_stay
                       - ivh_2 - rop_2 - nec_2 - pda_2,
-                      data = train_data2,
+                      data = train_data_2,
                       method = "lm",
                       trControl = ctrl,
                       metric = "RMSE")
@@ -514,7 +544,7 @@ lm_log_caret
 ```{r lm_log_categorical_caret}
 lm_log_categorical_caret <- train(log_los ~ . - patient_id - length_of_stay
                       - ivh - rop - nec - pda,
-                      data = train_data2,
+                      data = train_data_2,
                       method = "lm",
                       trControl = ctrl,
                       metric = "RMSE")
@@ -567,7 +597,7 @@ ggplot(data = log_aug,
 ```{r tree_model}
 tree_model <- rpart(log_los ~ . - patient_id - length_of_stay
                     - ivh_2 - nec_2 - rop_2 - pda_2,
-                    data = train_data2,
+                    data = train_data_2,
                     method = "anova")
 
 summary(tree_model)
@@ -578,7 +608,7 @@ rpart.plot(tree_model, type = 3, extra = 101)
 ```
 
 
-### Random Forest Model
+### Random Forest Models
 
 ```{r rf_model}
 rf_model <- ranger(length_of_stay ~ . - patient_id
@@ -588,18 +618,18 @@ rf_model <- ranger(length_of_stay ~ . - patient_id
                    importance = "impurity")
 
 rf_model
-rf_model$prediction.error
+sqrt(rf_model$prediction.error)
 ```
 
 ```{r rf_log_model}
 rf_log_model <- ranger(log_los ~ . - patient_id - length_of_stay
                        - ivh_2 - nec_2 - rop_2 - pda_2,
-                   data = train_data2,
+                   data = train_data_2,
                    num.trees = 500,
                    importance = "impurity")
 
 rf_log_model
-rf_log_model$prediction.error
+sqrt(rf_log_model$prediction.error)
 ```
 
 ```{r rf_categorical_model}
@@ -610,18 +640,18 @@ rf_categorical_model <- ranger(length_of_stay ~ . - patient_id
                                importance = "impurity")
 
 rf_categorical_model
-rf_categorical_model$prediction.error
+sqrt(rf_categorical_model$prediction.error)
 ```
 
 ```{r rf_categorical_log_model}
 rf_categorical_log_model <- ranger(log_los ~ . - patient_id - length_of_stay
                                    - ivh - nec - rop - pda,
-                                   data = train_data2,
+                                   data = train_data_2,
                                    num.trees = 500,
                                    importance = "impurity")
 
 rf_categorical_log_model
-rf_categorical_log_model$prediction.error
+sqrt(rf_categorical_log_model$prediction.error)
 ```
 
 ```{r rf_compare}
@@ -629,13 +659,13 @@ tibble(model = c("RF LOS (Severity)",
                  "RF log LOS (Severity)",
                  "RF LOS (Categorical)",
                  "RF log LOS (Categorical)"),
-       oob_rmse = c(rf_model$prediction.error,
-                    rf_log_model$prediction.error,
-                    rf_categorical_model$prediction.error,
-                    rf_categorical_log_model$prediction.error))
+       oob_rmse = c(sqrt(rf_model$prediction.error),
+                    sqrt(rf_log_model$prediction.error),
+                    sqrt(rf_categorical_model$prediction.error),
+                    sqrt(rf_categorical_log_model$prediction.error)))
 ```
 
-```{r rf_formula-p}
+```{r rf_formula, p}
 rf_formula <- length_of_stay ~ . - patient_id - ivh_2 - nec_2 - rop_2 - pda_2
 
 p <- ncol(model.matrix(rf_formula, data = train_data)) - 1
@@ -656,12 +686,12 @@ rf_mtry_results <- purrr::map_dfr(mtry_grid, function(m)
                     mtry = m,
                     importance = "impurity")
   tibble(mtry = m,
-         oob_rmse = rf_fit$prediction.error)})
+         oob_rmse = sqrt(rf_fit$prediction.error))})
 
 rf_mtry_results
 ```
 
-```{r mtry_grid_2-tree_grid}
+```{r mtry_grid_2, tree_grid}
 mtry_grid_2 <- c(4, 5, 6)
 tree_grid <- c(300, 500, 800)
 ```
@@ -673,7 +703,7 @@ rf_grid <- expand.grid(mtry = mtry_grid_2,
 rf_grid
 ```
 
-```{r rf_mtry_tree_grid}
+```{r rf_grid_results}
 set.seed(1234)
 
 rf_grid_results <- purrr::pmap_dfr(rf_grid, function(mtry, num_trees)
@@ -684,7 +714,7 @@ rf_grid_results <- purrr::pmap_dfr(rf_grid, function(mtry, num_trees)
                     importance = "impurity")
   tibble(mtry = mtry,
          num_trees = num_trees,
-         oob_rmse = rf_fit$prediction.error)})
+         oob_rmse = sqrt(rf_fit$prediction.error))})
 
 rf_grid_results
 ```
@@ -726,26 +756,257 @@ ggplot(data = importance_df,
 ```
 
 
-### Predictive Performance
+### Random Forest with Restriction to the 90th Percentile Model
+
+```{r los_90}
+los_90 <- quantile(train_data$length_of_stay, 0.90)
+
+los_90
+```
+
+```{r train_data_90, test_data_90}
+train_data_90 <- train_data %>%
+  filter(length_of_stay <= los_90)
+
+test_data_90 <- test_data %>%
+  filter(length_of_stay <= los_90)
+```
+
+```{r rf_model_final_90}
+set.seed(1234)
+
+rf_model_final_90 <- ranger(formula = rf_formula,
+                            data = train_data_90,
+                            num.trees = 500,
+                            mtry = 4,
+                            importance = "impurity")
+
+rf_model_final_90
+```
+
+
+### Random Forest Classification Model (5 Categories)
+
+```{r duke_nicu_clean_3-table}
+table(duke_nicu_clean_3$los_category)
+```
+
+```{r duke_nicu_model_class}
+duke_nicu_model_class <- duke_nicu_clean_3 %>%
+  filter(!is.na(los_category))
+
+glimpse(duke_nicu_model_class)
+```
+
+```{r duke_nicu_model_class_split}
+set.seed(1234)
+
+duke_nicu_model_class_split <- initial_split(duke_nicu_model_class,
+                             prop = 0.80,
+                             strata = los_category)
+
+train_data_3 <- training(duke_nicu_model_class_split)
+test_data_3  <- testing(duke_nicu_model_class_split)
+
+glimpse(train_data_3)
+glimpse(test_data_3)
+```
+
+```{r mtry_grid_3, tree_grid_2}
+mtry_grid_3 <- c(3, 4, 5, 6, 7, 8)
+tree_grid_2 <- c(300, 500, 800)
+```
+
+```{r rf_grid_2}
+rf_grid_2 <- expand.grid(mtry_2 = mtry_grid_3,
+                         num_trees_2 = tree_grid_2)
+
+rf_grid_2
+```
+
+```{r rf_grid_results_2}
+set.seed(1234)
+
+rf_grid_results_2 <- purrr::pmap_dfr(rf_grid_2, function(mtry_2, num_trees_2)
+  {rf_fit_2 <- ranger(formula = los_category ~ .
+                      - patient_id - length_of_stay,
+                      data = train_data_3,
+                      num.trees = num_trees_2,
+                      mtry = mtry_2,
+                      importance = "impurity",
+                      probability = TRUE)
+  tibble(mtry_2 = mtry_2,
+         num_trees_2 = num_trees_2,
+         oob_error = rf_fit_2$prediction.error,
+         oob_accuracy = 1 - rf_fit_2$prediction.error)})
+
+rf_grid_results_2
+```
+
+```{r best_rf_class}
+best_rf_class <- rf_grid_results_2 %>%
+  arrange(oob_error) %>%
+  slice(1)
+
+best_rf_class
+```
+
+```{r rf_class_model}
+set.seed(1234)
+
+rf_class_model <- ranger(formula = los_category ~ .
+                         - patient_id - length_of_stay,
+                         data = train_data_3,
+                         num.trees = best_rf_class$num_trees_2,
+                         mtry = best_rf_class$mtry_2,
+                         importance = "impurity",
+                         probability = TRUE)
+```
+
+```{r rf_class_pred, predicted_classes}
+rf_class_preds <- predict(rf_class_model, data = test_data_3)
+
+predicted_classes <- colnames(rf_class_preds$predictions)[
+                              max.col(rf_class_preds$predictions)]
+
+predicted_classes <- factor(predicted_classes,
+                            levels = levels(test_data_3$los_category))
+```
+
+```{r confusion-matrix}
+confusionMatrix(predicted_classes, test_data_3$los_category)
+```
+
+
+### Random Forest Classification Model (3 Categories)
+
+```{r duke_nicu_clean_4-table}
+table(duke_nicu_clean_4$los_category_2)
+```
+
+```{r duke_nicu_model_class_2}
+duke_nicu_model_class_2 <- duke_nicu_clean_4 %>%
+  filter(!is.na(los_category_2))
+
+glimpse(duke_nicu_model_class_2)
+```
+
+```{r duke_nicu_model_class_split_2}
+set.seed(1234)
+
+duke_nicu_model_class_split_2 <- initial_split(duke_nicu_model_class_2,
+                                               prop = 0.80,
+                                               strata = los_category_2)
+
+train_data_4 <- training(duke_nicu_model_class_split_2)
+test_data_4  <- testing(duke_nicu_model_class_split_2)
+
+glimpse(train_data_4)
+glimpse(test_data_4)
+```
+
+```{r mtry_grid_4, tree_grid_3}
+mtry_grid_4 <- c(3, 4, 5, 6, 7, 8)
+tree_grid_3 <- c(300, 500, 800)
+```
+
+```{r rf_grid_3}
+rf_grid_3 <- expand.grid(mtry_3 = mtry_grid_4,
+                         num_trees_3 = tree_grid_3)
+
+rf_grid_3
+```
+
+```{r rf_grid_results_3}
+set.seed(1234)
+
+rf_grid_results_3 <- purrr::pmap_dfr(rf_grid_3, function(mtry_3, num_trees_3)
+  {rf_fit_3 <- ranger(formula = los_category_2 ~ .
+                      - patient_id - length_of_stay,
+                      data = train_data_4,
+                      num.trees = num_trees_3,
+                      mtry = mtry_3,
+                      importance = "impurity",
+                      probability = TRUE)
+  tibble(mtry_3 = mtry_3,
+         num_trees_3 = num_trees_3,
+         oob_error = rf_fit_3$prediction.error,
+         oob_accuracy = 1 - rf_fit_3$prediction.error)})
+
+rf_grid_results_3
+```
+
+```{r best_rf_class_2}
+best_rf_class_2 <- rf_grid_results_3 %>%
+  arrange(oob_error) %>%
+  slice(1)
+
+best_rf_class_2
+```
+
+```{r rf_class_model_2}
+set.seed(1234)
+
+rf_class_model_2 <- ranger(formula = los_category_2 ~ .
+                           - patient_id - length_of_stay,
+                           data = train_data_4,
+                           num.trees = best_rf_class_2$num_trees_3,
+                           mtry = best_rf_class_2$mtry_3,
+                           importance = "impurity",
+                           probability = TRUE)
+```
+
+```{r rf_class_pred_2, predicted_classes_2}
+rf_class_preds_2 <- predict(rf_class_model_2, data = test_data_4)
+
+predicted_classes_2 <- colnames(rf_class_preds_2$predictions)[
+                                max.col(rf_class_preds_2$predictions)]
+
+predicted_classes_2 <- factor(predicted_classes_2,
+                              levels = levels(test_data_4$los_category_2))
+```
+
+```{r confusion-matrix2}
+confusionMatrix(predicted_classes_2, test_data_4$los_category_2)
+```
+
+
+## Predictive Performance
 
 ```{r rmse}
 rmse <- function(actual, predicted)
   {sqrt(mean((actual - predicted)^2))}
 ```
 
-```{r lm_log_preds-rf_preds}
-lm_log_preds <- predict(full_lm_log, newdata = test_data2)
+```{r lm_log_preds, rf_preds, rf_preds_90}
+lm_log_preds <- predict(full_lm_log, newdata = test_data_2)
+lm_log_preds_days <- exp(lm_log_preds) - 1
 
 rf_preds <- predict(rf_model_final, data = test_data)$predictions
+
+rf_preds_90 <- predict(rf_model_final_90, data = test_data_90)$predictions
 ```
 
 ```{r rmse_comparison}
 rmse_comparison <- tibble(Model = c("Log-Linear Regression",
-                                    "Random Forest"),
-                          Outcome_Scale = c("Log(LOS + 1)",
-                                            "Days"),
-                          RMSE = c(rmse(test_data2$log_los, lm_log_preds),
-                                   rmse(test_data$length_of_stay, rf_preds)))
+                                    "Random Forest",
+                                    "Random Forest (90th Percentile)"),
+                          RMSE = c(rmse(test_data$length_of_stay, lm_log_preds_days),
+                                   rmse(test_data$length_of_stay, rf_preds),
+                                   rmse(test_data_90$length_of_stay, rf_preds_90)))
 
 rmse_comparison
+```
+
+```{r doctor_rmse}
+test_ids <- test_data$patient_id
+
+doctor_test_data <- duke_nicu %>%
+  rename(patient_id = `Pt ID (Rnd num)`) %>%
+  filter(patient_id %in% test_ids)
+
+doctor_rmse <- rmse(doctor_test_data$LOS,
+                    doctor_test_data$`LOS Predictor`)
+
+doctor_rmse
 ```
