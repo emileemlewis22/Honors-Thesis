@@ -1,7 +1,7 @@
 ---
 title: "Honors Thesis - NICU Data Analysis"
 author: "Emilee Lewis"
-date: "2/19/2026"
+date: "3/2/2026"
 output:
   html_document:
     highlight: tango
@@ -27,6 +27,7 @@ library(rpart.plot)
 library(ranger)
 library(pROC)
 library(factoextra)
+library(cluster)
 ```
 
 
@@ -1091,7 +1092,7 @@ doctor_rmse
 ```
 
 
-## K-Means Clustering
+### K-Means Clustering
 
 ```{r cluster_data}
 cluster_data <- duke_nicu_clean_2 %>%
@@ -1105,23 +1106,93 @@ cluster_data <- duke_nicu_clean_2 %>%
 fviz_nbclust(cluster_data, kmeans, method = "wss")
 ```
 
-```{r kmeans_fit}
+```{r kmeans}
 set.seed(1234)
 
-kmeans_fit <- kmeans(cluster_data, centers = 2, nstart = 20)
+kmeans_k2 <- kmeans(cluster_data, centers = 2, nstart = 20)
+kmeans_k4 <- kmeans(cluster_data, centers = 4, nstart = 20)
+kmeans_k5 <- kmeans(cluster_data, centers = 5, nstart = 20)
+kmeans_k7 <- kmeans(cluster_data, centers = 7, nstart = 20)
 ```
 
-```{r duke_nicu_clean_2$cluster}
-duke_nicu_clean_2$cluster <- factor(kmeans_fit$cluster)
+```{r kmeans$cluster}
+duke_nicu_clean_2 <- duke_nicu_clean_2 %>%
+  mutate(cluster_2 = factor(kmeans_k2$cluster),
+         cluster_4 = factor(kmeans_k4$cluster),
+         cluster_5 = factor(kmeans_k5$cluster),
+         cluster_7 = factor(kmeans_k7$cluster))
+```
 
-duke_nicu_clean_2 %>%
-  group_by(cluster) %>%
+```{r cluster_summary-function}
+cluster_summary <- function(data, cluster_var) {data %>%
+    group_by({{ cluster_var }}) %>%
+    summarize(mean_ga = mean(gestational_age, na.rm = TRUE),
+              mean_bw = mean(birth_weight, na.rm = TRUE),
+              ivh_rate = mean(ivh_2 == "Yes", na.rm = TRUE),
+              rop_rate = mean(rop_2 == "Yes", na.rm = TRUE),
+              nec_rate = mean(nec_2 == "Yes", na.rm = TRUE),
+              pda_rate = mean(pda_2 == "Yes", na.rm = TRUE),
+              mean_los = mean(length_of_stay, na.rm = TRUE),
+              n = n())}
+```
+
+```{r cluster_summary}
+cluster_summary(duke_nicu_clean_2, cluster_2)
+cluster_summary(duke_nicu_clean_2, cluster_4)
+cluster_summary(duke_nicu_clean_2, cluster_5)
+cluster_summary(duke_nicu_clean_2, cluster_7)
+```
+
+```{r fviz_cluster}
+fviz_cluster(kmeans_k2, data = cluster_data, geom = "point") +
+  ggtitle("K-Means Clustering (k = 2)")
+
+fviz_cluster(kmeans_k4, data = cluster_data, geom = "point") +
+  ggtitle("K-Means Clustering (k = 4)")
+
+fviz_cluster(kmeans_k5, data = cluster_data, geom = "point") +
+  ggtitle("K-Means Clustering (k = 5)")
+
+fviz_cluster(kmeans_k7, data = cluster_data, geom = "point") +
+  ggtitle("K-Means Clustering (k = 7)")
+```
+
+```{r cluster4_summary}
+cluster4_summary <- duke_nicu_clean_2 %>%
+  group_by(cluster_4) %>%
   summarize(mean_ga = mean(gestational_age, na.rm = TRUE),
             mean_bw = mean(birth_weight, na.rm = TRUE),
             ivh_rate = mean(ivh_2 == "Yes", na.rm = TRUE),
             rop_rate = mean(rop_2 == "Yes", na.rm = TRUE),
             nec_rate = mean(nec_2 == "Yes", na.rm = TRUE),
             pda_rate = mean(pda_2 == "Yes", na.rm = TRUE),
-            mean_los = mean(length_of_stay, na.rm = TRUE),
-            n = n())
+            mean_los = mean(length_of_stay, na.rm = TRUE)) %>%
+  pivot_longer(-cluster_4, names_to = "measure", values_to = "value") %>%
+  mutate(measure = factor(measure,
+                          levels = c("mean_ga",
+                                     "mean_bw",
+                                     "ivh_rate",
+                                     "rop_rate",
+                                     "nec_rate",
+                                     "pda_rate",
+                                     "mean_los"),
+                          labels = c("Mean Gestational Age (Weeks)",
+                                     "Mean Birth Weight (Grams)",
+                                     "IVH Rate",
+                                     "ROP Rate",
+                                     "NEC Rate",
+                                     "PDA Rate",
+                                     "Mean Length of Stay (Days)")))
+```
+
+```{r cluster4_summary-col}
+ggplot(data = cluster4_summary,
+       mapping = aes(x = cluster_4,
+                     y = value)) +
+  geom_col(fill = "#4E79A7") +
+  facet_wrap(~ measure, scales = "free_y", ncol = 2) +
+  theme_minimal() +
+  labs(x = "Cluster",
+       y = NULL,
+       title = "Cluster Profiles (k = 4)")
 ```
