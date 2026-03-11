@@ -1,7 +1,7 @@
 ---
 title: "Honors Thesis - NICU Data Analysis"
 author: "Emilee Lewis"
-date: "3/2/2026"
+date: "3/11/2026"
 output:
   html_document:
     highlight: tango
@@ -19,6 +19,8 @@ library(tidyverse)
 library(readxl)
 library(janitor)
 library(GGally)
+library(cluster)
+library(factoextra)
 library(tidymodels)
 library(caret)
 library(broom)
@@ -26,8 +28,6 @@ library(rpart)
 library(rpart.plot)
 library(ranger)
 library(pROC)
-library(factoextra)
-library(cluster)
 ```
 
 
@@ -39,7 +39,7 @@ duke_nicu <- read_xlsx("Data/Duke NICU Data.xlsx")
 ## Data Dictionary
 
 | Variable                      | Description
-|:----------------|:-----------------------------------------------------------------
+|:----------------|:----------------------------------------------------------------
 |`patient_id`                   | De-identified, randomized patient identification number assigned to each infant
 |`survival_status`              | Whether the infant was alive or deceased at the time of discharge
 |`gestational_age`              | Gestational age at birth (in weeks)
@@ -466,6 +466,161 @@ duke_nicu_clean %>%
 duke_nicu_clean %>%
   select(gestational_age, birth_weight, length_of_stay) %>%
   ggpairs()
+```
+
+
+### K-Means Clustering
+
+```{r cluster_data}
+cluster_data <- duke_nicu_clean_2 %>%
+  select(gestational_age, birth_weight,
+         ivh_2, rop_2, nec_2, pda_2) %>%
+  mutate(across(ends_with("_2"), ~ ifelse(. == "Yes", 1, 0))) %>%
+  scale()
+```
+
+```{r fviz_nbclust}
+fviz_nbclust(cluster_data, kmeans, method = "wss") +
+  labs(x = "Number of Clusters (k)",
+       y = "Within-Cluster Sum of Squares (WSS)",
+       title = "Elbow Plot for Determining the Number of Clusters")
+```
+
+```{r kmeans}
+set.seed(1234)
+
+kmeans_k2 <- kmeans(cluster_data, centers = 2, nstart = 20)
+kmeans_k4 <- kmeans(cluster_data, centers = 4, nstart = 20)
+kmeans_k5 <- kmeans(cluster_data, centers = 5, nstart = 20)
+kmeans_k7 <- kmeans(cluster_data, centers = 7, nstart = 20)
+```
+
+```{r kmeans$cluster}
+duke_nicu_clean_2 <- duke_nicu_clean_2 %>%
+  mutate(cluster_2 = factor(kmeans_k2$cluster),
+         cluster_4 = factor(kmeans_k4$cluster),
+         cluster_5 = factor(kmeans_k5$cluster),
+         cluster_7 = factor(kmeans_k7$cluster))
+```
+
+```{r cluster_summary-function}
+cluster_summary <- function(data, cluster_var) {data %>%
+    group_by({{cluster_var}}) %>%
+    summarize(mean_ga = mean(gestational_age, na.rm = TRUE),
+              mean_bw = mean(birth_weight, na.rm = TRUE),
+              ivh_rate = mean(ivh_2 == "Yes", na.rm = TRUE),
+              rop_rate = mean(rop_2 == "Yes", na.rm = TRUE),
+              nec_rate = mean(nec_2 == "Yes", na.rm = TRUE),
+              pda_rate = mean(pda_2 == "Yes", na.rm = TRUE),
+              mean_los = mean(length_of_stay, na.rm = TRUE))}
+```
+
+```{r cluster_summary}
+summary_k2 <- cluster_summary(duke_nicu_clean_2, cluster_2)
+summary_k4 <- cluster_summary(duke_nicu_clean_2, cluster_4)
+summary_k5 <- cluster_summary(duke_nicu_clean_2, cluster_5)
+summary_k7 <- cluster_summary(duke_nicu_clean_2, cluster_7)
+
+summary_k2
+summary_k4
+summary_k5
+summary_k7
+```
+
+```{r fviz_cluster}
+fviz_cluster(kmeans_k2, data = cluster_data, geom = "point") +
+  ggtitle("K-Means Clustering (k = 2)")
+
+fviz_cluster(kmeans_k4, data = cluster_data, geom = "point") +
+  ggtitle("K-Means Clustering (k = 4)")
+
+fviz_cluster(kmeans_k5, data = cluster_data, geom = "point") +
+  ggtitle("K-Means Clustering (k = 5)")
+
+fviz_cluster(kmeans_k7, data = cluster_data, geom = "point") +
+  ggtitle("K-Means Clustering (k = 7)")
+```
+
+```{r fviz_cluster-kmeans_k4}
+fviz_cluster(kmeans_k4, data = cluster_data, geom = "point") +
+  labs(x = "Principal Component 1",
+       y = "Principal Component 2",
+       title = "K-Means Clustering of Infant Groups (k = 4)",
+       color = "Infant Group",
+       shape = "Infant Group",
+       fill = "Infant Group") +
+  scale_color_discrete(breaks = c("4", "1", "3", "2"),
+                       labels = c("Extremely Premature",
+                                  "Very Premature",
+                                  "Moderately Premature",
+                                  "Near-Term")) +
+  scale_fill_discrete(breaks = c("4", "1", "3", "2"),
+                      labels = c("Extremely Premature",
+                                 "Very Premature",
+                                 "Moderately Premature",
+                                 "Near-Term")) +
+  scale_shape_discrete(breaks = c("4", "1", "3", "2"),
+                       labels = c("Extremely Premature",
+                                  "Very Premature",
+                                  "Moderately Premature",
+                                  "Near-Term")) +
+  theme_minimal()
+```
+
+```{r group_4}
+duke_nicu_clean_2 <- duke_nicu_clean_2 %>%
+  mutate(group_4 = factor(cluster_4,
+                          levels = c("4", "1", "3", "2"),
+                          labels = c("Extremely Premature",
+                                     "Very Premature",
+                                     "Moderately Premature",
+                                     "Near-Term")))
+
+cluster_summary(duke_nicu_clean_2, group_4)
+```
+
+```{r cluster4_summary}
+cluster4_summary <- duke_nicu_clean_2 %>%
+  group_by(group_4) %>%
+  summarize(mean_ga = mean(gestational_age, na.rm = TRUE),
+            mean_bw = mean(birth_weight, na.rm = TRUE),
+            ivh_rate = mean(ivh_2 == "Yes", na.rm = TRUE),
+            rop_rate = mean(rop_2 == "Yes", na.rm = TRUE),
+            nec_rate = mean(nec_2 == "Yes", na.rm = TRUE),
+            pda_rate = mean(pda_2 == "Yes", na.rm = TRUE),
+            mean_los = mean(length_of_stay, na.rm = TRUE)) %>%
+  pivot_longer(-group_4, names_to = "measure", values_to = "value") %>%
+  mutate(measure = factor(measure,
+                          levels = c("mean_ga",
+                                     "mean_bw",
+                                     "ivh_rate",
+                                     "rop_rate",
+                                     "nec_rate",
+                                     "pda_rate",
+                                     "mean_los"),
+                          labels = c("Mean Gestational Age (Weeks)",
+                                     "Mean Birth Weight (Grams)",
+                                     "IVH Rate",
+                                     "ROP Rate",
+                                     "NEC Rate",
+                                     "PDA Rate",
+                                     "Mean Length of Stay (Days)")))
+```
+
+```{r cluster4_summary-col}
+ggplot(data = cluster4_summary,
+       mapping = aes(x = group_4,
+                     y = value)) +
+  geom_col(fill = "#4E79A7") +
+  facet_wrap(~ measure, scales = "free_y", ncol = 2) +
+  scale_x_discrete(labels = c("Extremely\nPremature",
+                              "Very\nPremature",
+                              "Moderately\nPremature",
+                              "Near-Term")) +
+  theme_minimal() +
+  labs(x = "Infant Group",
+       y = NULL,
+       title = "Clinical Profiles of Infant Groups (k = 4)")
 ```
 
 
@@ -1089,110 +1244,4 @@ doctor_rmse <- rmse(doctor_test_data$LOS,
                     doctor_test_data$`LOS Predictor`)
 
 doctor_rmse
-```
-
-
-### K-Means Clustering
-
-```{r cluster_data}
-cluster_data <- duke_nicu_clean_2 %>%
-  select(gestational_age, birth_weight,
-         ivh_2, rop_2, nec_2, pda_2) %>%
-  mutate(across(ends_with("_2"), ~ ifelse(. == "Yes", 1, 0))) %>%
-  scale()
-```
-
-```{r fviz_nbclust}
-fviz_nbclust(cluster_data, kmeans, method = "wss")
-```
-
-```{r kmeans}
-set.seed(1234)
-
-kmeans_k2 <- kmeans(cluster_data, centers = 2, nstart = 20)
-kmeans_k4 <- kmeans(cluster_data, centers = 4, nstart = 20)
-kmeans_k5 <- kmeans(cluster_data, centers = 5, nstart = 20)
-kmeans_k7 <- kmeans(cluster_data, centers = 7, nstart = 20)
-```
-
-```{r kmeans$cluster}
-duke_nicu_clean_2 <- duke_nicu_clean_2 %>%
-  mutate(cluster_2 = factor(kmeans_k2$cluster),
-         cluster_4 = factor(kmeans_k4$cluster),
-         cluster_5 = factor(kmeans_k5$cluster),
-         cluster_7 = factor(kmeans_k7$cluster))
-```
-
-```{r cluster_summary-function}
-cluster_summary <- function(data, cluster_var) {data %>%
-    group_by({{ cluster_var }}) %>%
-    summarize(mean_ga = mean(gestational_age, na.rm = TRUE),
-              mean_bw = mean(birth_weight, na.rm = TRUE),
-              ivh_rate = mean(ivh_2 == "Yes", na.rm = TRUE),
-              rop_rate = mean(rop_2 == "Yes", na.rm = TRUE),
-              nec_rate = mean(nec_2 == "Yes", na.rm = TRUE),
-              pda_rate = mean(pda_2 == "Yes", na.rm = TRUE),
-              mean_los = mean(length_of_stay, na.rm = TRUE),
-              n = n())}
-```
-
-```{r cluster_summary}
-cluster_summary(duke_nicu_clean_2, cluster_2)
-cluster_summary(duke_nicu_clean_2, cluster_4)
-cluster_summary(duke_nicu_clean_2, cluster_5)
-cluster_summary(duke_nicu_clean_2, cluster_7)
-```
-
-```{r fviz_cluster}
-fviz_cluster(kmeans_k2, data = cluster_data, geom = "point") +
-  ggtitle("K-Means Clustering (k = 2)")
-
-fviz_cluster(kmeans_k4, data = cluster_data, geom = "point") +
-  ggtitle("K-Means Clustering (k = 4)")
-
-fviz_cluster(kmeans_k5, data = cluster_data, geom = "point") +
-  ggtitle("K-Means Clustering (k = 5)")
-
-fviz_cluster(kmeans_k7, data = cluster_data, geom = "point") +
-  ggtitle("K-Means Clustering (k = 7)")
-```
-
-```{r cluster4_summary}
-cluster4_summary <- duke_nicu_clean_2 %>%
-  group_by(cluster_4) %>%
-  summarize(mean_ga = mean(gestational_age, na.rm = TRUE),
-            mean_bw = mean(birth_weight, na.rm = TRUE),
-            ivh_rate = mean(ivh_2 == "Yes", na.rm = TRUE),
-            rop_rate = mean(rop_2 == "Yes", na.rm = TRUE),
-            nec_rate = mean(nec_2 == "Yes", na.rm = TRUE),
-            pda_rate = mean(pda_2 == "Yes", na.rm = TRUE),
-            mean_los = mean(length_of_stay, na.rm = TRUE)) %>%
-  pivot_longer(-cluster_4, names_to = "measure", values_to = "value") %>%
-  mutate(measure = factor(measure,
-                          levels = c("mean_ga",
-                                     "mean_bw",
-                                     "ivh_rate",
-                                     "rop_rate",
-                                     "nec_rate",
-                                     "pda_rate",
-                                     "mean_los"),
-                          labels = c("Mean Gestational Age (Weeks)",
-                                     "Mean Birth Weight (Grams)",
-                                     "IVH Rate",
-                                     "ROP Rate",
-                                     "NEC Rate",
-                                     "PDA Rate",
-                                     "Mean Length of Stay (Days)")))
-```
-
-```{r cluster4_summary-col}
-ggplot(data = cluster4_summary,
-       mapping = aes(x = cluster_4,
-                     y = value)) +
-  geom_col(fill = "#4E79A7") +
-  facet_wrap(~ measure, scales = "free_y", ncol = 2) +
-  theme_minimal() +
-  labs(x = "Cluster",
-       y = NULL,
-       title = "Cluster Profiles (k = 4)")
 ```
